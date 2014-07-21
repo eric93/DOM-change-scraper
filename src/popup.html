@@ -1,8 +1,17 @@
 <html>
     <head>
-        <script type = "text/javascript" src = "sender.js"></script>
+        <style>
+            body {
+                width: 300px
+            }
+        </style>
     </head>
     <body>
-        <span id = "text">asdf</span>
+        <form>
+            <input type = "radio" name = "enable" id = "off">Off</input>
+            <input type = "radio" name = "enable" id = "debug">Debug</input>
+            <input type = "button" name = "Test" id = "test">Test</input>
+        </form>
+        <script type = "text/javascript" src = "popup.js"></script>
     </body>
 </html>

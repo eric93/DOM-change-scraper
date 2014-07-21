@@ -18,6 +18,10 @@
     }
   ],
 
+  "background" : {
+      "scripts": ["sender.js"]
+  },
+
   "permissions": [
     "tabs", "<all_urls>"
   ]
