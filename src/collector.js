@@ -1,30 +1,35 @@
 var port = chrome.runtime.connect({name: "target"});
 function getDomPosition(target) {
     if(!target.uniqueId) {
-        target.uniqueId = uniqueNodeId();
+        throw new Error("Node does not have an id");
     }
     return target.uniqueId;
 }
 
 function findPos(parent, child) {
-        return Array.prototype.indexOf.call(parent.childNodes, child);
+    return Array.prototype.indexOf.call(parent.childNodes, child);
 }
 
 uniqueId = 1;
 function uniqueNodeId() {
+    if(uniqueId == 122 || uniqueId == 121) {
+        debugger;
+    }
     return uniqueId++;
 }
 
 function getDOM() {
     serializeIds(document.documentElement);
-    return S.serializeToString(document);
+    var ret = S.serializeToString(document);
+    removeIdAttrs(document.documentElement);
+    return ret;
 }
 
 seenValues = {}
+docId = -1;
+seenRemoved = {}
+seenAdded = {}
 function handleStateChange(m) {
-    if(!m.target.uniqueId) {
-        m.target['uniqueId'] = uniqueNodeId();
-    }
     if(!seenValues[m.target.uniqueId]) {
         seenValues[m.target.uniqueId] = {attrs: {}, charData: {data: null}};
     }
@@ -61,7 +66,7 @@ function handleStateChange(m) {
         // DOM and mutations were updated in sync with each other.
         values.push(curDOM);
     } else {
-        Error("Unexpected situation; attribute: " + changeIdx + 
+        throw new Error("Unexpected situation; attribute: " + changeIdx + 
                 " seen values: " + values
                 + " current update: (" + m.oldValue + "," + curDOM +")");
     }
@@ -78,13 +83,17 @@ function serialize(nodeLst) {
 
 function serializeNode(node) {
     serializeIds(node);
-    return S.serializeToString(node);
+    var ret =  S.serializeToString(node);
+    removeIdAttrs(node);
+    return ret;
 }
 
 function serializeIds(node) {
-    if(node.uniqueId) {
+    var type = node.nodeType;
+    // Text and comments don't have attributes
+    if(node.uniqueId && type != 3 && type != 8 && type != 7) {
         console.assert(!node.hasAttribute("data-uniqueid") ||
-            node.getAttribute("data-uniqueid") == node.uniqueId);
+                node.getAttribute("data-uniqueid") == node.uniqueId);
         node.setAttribute("data-uniqueid", node.uniqueId);
     }
     for (var i = 0; i < node.childNodes.length; i++) {
@@ -92,29 +101,43 @@ function serializeIds(node) {
     }
 }
 
+function removeIdAttrs(node) {
+    var type = node.nodeType;
+    // Text and comments don't have attributes
+    if(node.uniqueId && type != 3 && type != 8 && type != 7) {
+        console.assert(node.hasAttribute("data-uniqueid"));
+        node.removeAttribute("data-uniqueid");
+    }
+    for (var i = 0; i < node.childNodes.length; i++) {
+        removeIdAttrs(node.childNodes[i]);
+    }
+}
+
 function sendStatesIfNeeded(nodes) {
-    for (node in nodes) {
-        if(node.uniqueId) {
+    for (var i = 0; i < nodes.length; i++) {
+        var node = nodes[i];
+        if(seenValues[node.uniqueId]) {
             var targetPos = getDomPosition(node);
             for (attr in seenValues[node.uniqueId].attrs) {
                 var changes = seenValues[node.uniqueId].attrs[attr];
                 for(var i = 1; i < changes.length; i++) {
-                    var attrsChanged = {target: targetPos, attribute: attr, oldValue: changes[i-1], newValue: changes[i]};
+                    var attrsChanged = {target: targetPos, attribute: attr, oldValue: changes[i-1], newValue: changes[i], type: "attributes"};
                     port.postMessage({dom: getDOM(), id: docId, changes: attrsChanged, newPage: false});
                 }
             }
 
-            if (seenValues[node.uniqueId].charData) {
-                var charDataStates = seenValues[node.uniqueId].charData;
+            if (seenValues[node.uniqueId].charData.data) {
+                var charDataStates = seenValues[node.uniqueId].charData.data;
+                var parentPos = getDomPosition(node.parentNode);
+                var childPos = findPos(node.parentNode, node);
                 for(var i = 1; i < charDataStates.length; i++) {
-                    var dataChanged = {target: targetPos, attribute: "characterData", oldValue: charDataStates[i-1], newValue: charDataStates[i]};
-                    port.postMessage({dom: getDOM(), id: docId, changes: attrsChanged, newPage: false});
+                    var dataChanged = {target: parentPos, childNum: childPos, oldValue: charDataStates[i-1], newValue: charDataStates[i], type: "characterData"};
+                    port.postMessage({dom: getDOM(), id: docId, changes: dataChanged, newPage: false});
                 }
             }
 
-            // In case this node is reparented, we don't want to hold on to
-            // its attribute change list.
-            node.uniqueId = null;
+            // Invalidate seenValues in case of reparenting
+            seenValues[node.uniqueId] = null;
         }
 
         sendStatesIfNeeded(node.childNodes);
@@ -122,26 +145,46 @@ function sendStatesIfNeeded(nodes) {
 }
 function handleTreeChange(m) {
     if (m.type == "childList") {
+
+        for(var i = 0; i < m.addedNodes.length; i++) {
+            addIdsToSubtree(m.addedNodes[i], true);
+        }
+
+        for(var i = 0; i < m.removedNodes.length; i++) {
+            removeIdsFromSubtree(m.removedNodes[i]);
+        }
+
         var targetPos = getDomPosition(m.target);
         var added = serialize(m.addedNodes);
         var removed = serialize(m.removedNodes);
-        var prev = m.previousSibling ? findPos(m.target, m.previousSibling) : 0;
-        var next = m.previousSibling ? findPos(m.target, m.previousSibling) : (m.target.childNodes.length - 1);
+        var prev = m.previousSibling ? m.previousSibling.uniqueId : -1;
+        var next = m.nextSibling ? m.nextSibling.uniqueId : -1;
+        for(var i = 0; i < m.target.childNodes.length; i++) {
+            var type = m.target.childNodes[i].nodeType;
+            // Text, comment, and processing instruction nodes
+            // all have character data.
+            if(type == 3 || type == 7 || type == 8) {
+                if(m.target.childNodes[i].uniqueId) {
+                    alert("Error: can't add/remove node with character data changes");
+                    throw new Error("can't add/remove node with character data changes");
+                }
+            }
+        }
 
         // If nodes have been removed, send their state changes before they're gone forever
         sendStatesIfNeeded(m.removedNodes);
 
-        return {added: added, removed: removed, prev: prev, next: next,
-            target: targetPos,
+        return {added: added, removed: removed, prev: prev,
+            next: next, target: targetPos,
             type: m.type};
     } else {
-        Error("Unknown attribute type: " + m.type);
+        throw new Error("Unknown attribute type: " + m.type);
     }
 }
 port.onMessage.addListener(function(msg) {
     if(msg.newDocId != -1) {
-        var docId = msg.newDocId;
-        var observer = new MutationObserver(function (mutations, obs) {
+        docId = msg.newDocId;
+        observer = new MutationObserver(function (mutations, obs) {
             mutations.forEach(function(m) {
                 // Attribute and character data changes are handled lazily since
                 // there's no good way to get the "current" value at mutation time.
@@ -162,7 +205,42 @@ port.onMessage.addListener(function(msg) {
         });
     }
 });
+
+function addIdsToSubtree(subtree, mark) {
+    // Text-data nodes have their position relative to their parents
+    if(subtree.nodeType != 3 && subtree.nodeType != 7 && subtree.nodeType != 8) {
+        if(subtree.uniqueId) {
+            throw new Error("Node already has an id");
+        } else {
+            subtree.uniqueId = uniqueNodeId();
+            if(mark){
+                seenAdded[subtree.uniqueId] = true;
+            }
+        }
+    }
+
+    for(var i = 0; i < subtree.childNodes.length; i++) {
+        addIdsToSubtree(subtree.childNodes[i], mark);
+    }
+}
+
+function removeIdsFromSubtree(subtree) {
+    // Text-data nodes have their position relative to their parents
+    if(subtree.nodeType != 3 && subtree.nodeType != 7 && subtree.nodeType != 8) {
+        if(subtree.uniqueId) {
+            seenRemoved[subtree.uniqueId] = true;
+            subtree.uniqueId = null;
+        }
+    }
+
+    for(var i = 0; i < subtree.childNodes.length; i++) {
+        removeIdsFromSubtree(subtree.childNodes[i]);
+    }
+}
+
+
 window.addEventListener("load", function() {
+    addIdsToSubtree(document.documentElement, false);
     port.postMessage({dom: getDOM(), newPage: true});
 });
 
