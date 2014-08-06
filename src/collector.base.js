@@ -285,11 +285,34 @@ function run() {
     }
 
     removeIdsFromSubtree(document.documentElement, true);
-    if (sameDom(myDom, document)) {
-        console.log("DOM is consistent");
-        return "asdf";
-    } else {
-        console.log("DOM is inconsistent");
-        return "asdf";
+
+    try {
+        if (sameDom(myDom, document)) {
+            console.log("DOM is consistent");
+        } else {
+            console.log("DOM is inconsistent");
+        }
+    } catch(e) {
+        console.log(e);
     }
+
+    var domReq = new XMLHttpRequest();
+    var url = "http://localhost:8080/store/" + document.domain + "/originaldom";
+    domReq.open("POST",url,true);
+    domReq.setRequestHeader("Content-type", "text/plain");
+    domReq.setRequestHeader("Content-length", original_dom.length);
+    domReq.setRequestHeader("Connection", "close");
+
+    domReq.send(original_dom);
+
+    var changesStr = JSON.stringify(changes);
+    var changesReq = new XMLHttpRequest();
+    var url2 = "http://localhost:8080/store/" + document.domain + "/changes";
+    changesReq.open("POST",url2,true);
+    changesReq.setRequestHeader("Content-type", "text/plain");
+    changesReq.setRequestHeader("Content-length", changesStr.length);
+    changesReq.setRequestHeader("Connection", "close");
+
+    changesReq.send(changesStr);
+
 };
