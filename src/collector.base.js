@@ -1,5 +1,5 @@
 uniqueId = 1;
-S = new XMLSerializer();
+Serializer = new XMLSerializer();
 window.addEventListener("load", function () {
     addIdsToSubtree(document.documentElement,false);
     original_dom = getDOM();
@@ -26,7 +26,7 @@ function uniqueNodeId() {
 }
 
 function getDOM() {
-    var ret = S.serializeToString(document);
+    var ret = Serializer.serializeToString(document);
     return ret;
 }
 
@@ -39,13 +39,13 @@ function serialize(nodeLst) {
 };
 
 function serializeNode(node) {
-    var ret =  S.serializeToString(node);
+    var ret =  Serializer.serializeToString(node);
     return ret;
 }
 
-P = new DOMParser();
+Parser = new DOMParser();
 function reconstruct(dom) {
-    var new_dom = P.parseFromString(dom,"text/xml");
+    var new_dom = Parser.parseFromString(dom,"text/xml");
     extractIds(new_dom.documentElement);
     new_dom.documentElement.removeAttribute("xmlns");
     return new_dom;
